@@ -1,0 +1,31 @@
+[project]
+name = "sinca"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139.2",
+    "fastparquet>=2026.5.0",
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.1",
+    "nbconvert>=7.17.1",
+    "nbformat>=5.10.4",
+    "numpy>=2.5.1",
+    "pandas>=3.0.3",
+    "pyarrow>=25.0.1",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.18.0",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "ipykernel>=7.3.0",
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
