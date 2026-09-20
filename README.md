@@ -15,7 +15,7 @@ Default target: **La Florida station (D12)**, Región Metropolitana, PM2.5.
 
 ```bash
 git clone https://github.com/GaboAbo/sinca_etl.git
-cd sinca_laflorida
+cd sinca_etl
 uv sync
 ```
 
@@ -53,8 +53,8 @@ uv run python -m main --full                # full refresh
 Hourly incremental runs, plus a weekly full sweep to pick up late validations:
 
 ```cron
-0 * * * *  cd /path/to/sinca_laflorida && uv run python -m main >> logs/pipeline.log 2>&1
-0 3 * * 0  cd /path/to/sinca_laflorida && uv run python -m main --full >> logs/pipeline.log 2>&1
+0 * * * *  cd /path/to/sinca_etl && uv run python -m main >> logs/pipeline.log 2>&1
+0 3 * * 0  cd /path/to/sinca_etl && uv run python -m main --full >> logs/pipeline.log 2>&1
 ```
 
 Create the log directory first: `mkdir -p logs`
