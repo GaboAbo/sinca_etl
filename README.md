@@ -14,7 +14,7 @@ Default target: **La Florida station (D12)**, Región Metropolitana, PM2.5.
 ## Setup
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/GaboAbo/sinca_etl.git
 cd sinca_laflorida
 uv sync
 ```
