@@ -34,7 +34,7 @@ def get_ids(regions: list = REGIONS) -> list[str]:
     return sorted(ids, key=int)
 
 
-def get_stations(ids: list[str] | None, refresh: bool = False) -> pd.DataFrame:
+def get_stations(ids: list[str] | None = None, refresh: bool = False) -> pd.DataFrame:
     if not ids or refresh:
         ids = get_ids()
 
