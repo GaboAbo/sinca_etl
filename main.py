@@ -1,5 +1,8 @@
-import logging, argparse
+import logging, argparse, sys
+import pandas as pd
 from datetime import date, timedelta
+from pathlib import Path
+from scripts.writter import REFERENCE_PATH
 
 from src.extract import load_raw
 from src.transform import clean
@@ -13,6 +16,25 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def load_catalog(path: Path) -> pd.DataFrame:
+    cat = pd.read_csv(path, dtype=str)
+    cat["height_m"] = pd.to_numeric(cat["height_m"]).astype("Int64")
+    for col in ("from", "to"):
+        cat[col] = pd.to_datetime(cat[col], format="%y%m%d").dt.date
+
+    return cat
+
+
+def params_help(cat: pd.DataFrame) -> str:
+    lines = []
+    for kind, label in (("Cal", "Air quality"), ("Met", "Meteorological")):
+        lines.append(f"{label}:")
+        lines += [f"  {p}" for p in sorted(cat.loc[cat["kind"] == kind, "param"].unique())]
+
+    return "\n".join(lines)
+
 
 def run(
         region: str = "RM",
@@ -56,40 +78,52 @@ def run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SINCA air quality pipeline")
-    parser.add_argument("-f", "--full", action="store_true", help="force full backfill")
-    parser.add_argument("-s", "--station", type=str, default="D12", help="station to work with")
-    parser.add_argument(
-        "-p", "--pollutant", type=str,
-        choices=["SO2", "NO", "NO2", "CO", "O3", "NOX", "PM10", "PM25",
-                 "RH", "RH3M", "TEMP", "TEMP3M", "WDIR", "WDIR10M", "WSPD", "WSPD10M"],
-        default="PM25",
-        help="""
-        pollutant or meterological parameter to work with
+    catalog_path = REFERENCE_PATH / "catalog.csv"
+    if not catalog_path.exists():
+        sys.exit(f"{catalog_path} not found: run the catalog builder first")
 
-        SO2:        Sulfur dioxide (SO2 - μg/m3N)
-        NO:         Nitrogen monoxide (NO - ppb)
-        NO2:        Nitrogen dioxide (NO2 - ppb)
-        CO:         Carbon monoxide (CO - ppm)
-        O3:         Ozone (O3 - ppb)
-        NOX:        Nitrogen oxides (NOX - ppb)
-        PM10:       Particulate matter PM10 (PM10 - μg/m3N)
-        PM25:       Particulate matter PM2.5 (PM2.5 - μg/m3)
-        RH:         Relative air humidity at sea level (Relative humidity - %)
-        RH3M:       Relative air humidity at 3m over sea level (Relative humidity - %)
-        TEMP:       Ambient temperature at sea level (Temperature - °C)
-        TEMP3M:     Ambient temperature at 3m over sea level (Temperature - °C)
-        WDIR:       Wind direction at sea level (Wind dir. - °)
-        WDIR10M:    Wind direction at 10m over sea level (Wind dir. - °)
-        WSPD:       Wind speed at sea level (Wind speed - m/s)
-        WSPD10M:    Wind speed at 10m over sea level (Wind speed - m/s)
-        """)
-    parser.add_argument("-n", "--no_cache", action="store_true", help="ignore cache")
+    catalog = load_catalog(catalog_path)
+
+    parser = argparse.ArgumentParser(
+        description="SINCA air quality pipeline",
+        epilog=params_help(catalog),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("-f", "--full", action="store_true", help="force full backfill")
+    parser.add_argument("-t", "--station", default="D12", help="station code")
+    parser.add_argument("-p", "--param", default="PM25",
+                        choices=sorted(catalog["param"].unique()), metavar="PARAM",
+                        help="parameter code (listed below)")
+    parser.add_argument("-H", "--height", type=int, help="sensor height in metres (Met only)")
+    parser.add_argument("-s", "--start", type=date.fromisoformat, help="YYYY-MM-DD")
+    parser.add_argument("-e", "--end", type=date.fromisoformat, help="YYYY-MM-DD")
+    parser.add_argument("-n", "--no-cache", action="store_true", help="ignore cache")
     args = parser.parse_args()
-    MET_PARAMS = {"RH","RH3M","TEMP","TEMP3M","WDIR","WDIR10M","WSPD","WSPD10M"}
-    kind = "Met" if args.pollutant in MET_PARAMS else "Cal"
+
+    series = catalog[(catalog["station"] == args.station) & (catalog["param"] == args.param)]
+    if args.height is not None:
+        series = series[series["height_m"] == args.height]
+    if series.empty:
+        parser.error(f"no {args.param} series at station {args.station}" + (f" at {args.height} m" if args.height is not None else ""))
+    if len(series) > 1:
+        heights = sorted(series["height_m"].dropna().tolist())
+        parser.error(f"{args.param} at {args.station} is measured at {heights} m; choose one with --height")
+
+    row = series.iloc[0]
+
+    latest = min(row["to"], date.today())
+    if args.start and args.start < row["from"]:
+        parser.error(f"--start is before this series begins ({row['from']})")
+    if args.end and args.end > latest:
+        parser.error(f"--end is after the last available date ({latest})")
+    if args.start and args.end and args.start > args.end:
+        parser.error("--start must be on or before --end")
+
     try:
-        run(station=args.station, pollutant=args.pollutant, kind=kind, full=args.full, use_cache=not args.no_cache)
+        run(region=row["region"], station=row["station"], kind=row["kind"],
+            pollutant=row["param"],
+            start=args.start, end=args.end,
+            full=args.full, use_cache=not args.no_cache)
     except Exception:
         logger.exception("pipeline run failed")
         raise
