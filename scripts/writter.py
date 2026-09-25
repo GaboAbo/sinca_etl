@@ -1,4 +1,4 @@
-import requests, time, re
+import requests, time, re, logging, argparse
 import pandas as pd
 
 from datetime import date
@@ -7,19 +7,28 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
 
 
-REGION_URL  = "https://sinca.mma.gob.cl/index.php/region/index/id/"
-STATION_URL = "https://sinca.mma.gob.cl/index.php/estacion/index/id/"
-REGIONS     = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIV", "XV", "XVI", "M"]
-COLUMNS     = ["page_id", "region", "station", "kind", "param", "header", "from", "to", "height_m", "macro"]
-STATION_PAT = re.compile(r"estacion/index/id/(\d+)")
+REGION_URL      = "https://sinca.mma.gob.cl/index.php/region/index/id/"
+STATION_URL     = "https://sinca.mma.gob.cl/index.php/estacion/index/id/"
+REGIONS         = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIV", "XV", "XVI", "M"]
+COLUMNS         = ["page_id", "region", "station", "kind", "param", "header", "from", "to", "height_m", "macro"]
+STATION_PAT     = re.compile(r"estacion/index/id/(\d+)")
+REFERENCE_PATH  = Path("archive")
 
 
-def write_catalog(df: pd.DataFrame, path: Path) -> None:
-    Path(f"{path}/").mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def write_catalogs(df: pd.DataFrame, path: Path = REFERENCE_PATH) -> None:    
+    snapshots = path / "snapshots"
+    snapshots.mkdir(parents=True, exist_ok=True)
     today = date.today().strftime("%y%m%d")
-    df.to_csv(f"{path}/{today}.csv", index=False)
-    df.to_csv(f"{path}.csv", index=False)
-
+    df.to_csv(snapshots / f"catalog_{today}.csv", index=False)
+    df.to_csv(path / "catalog.csv", index=False)
+    logger.info("wrote %d stations to %s", len(df), path)
+    
 
 def get_ids(regions: list = REGIONS) -> list[str]:
     ids = set()
@@ -31,15 +40,14 @@ def get_ids(regions: list = REGIONS) -> list[str]:
         
         time.sleep(1)
 
+    logger.info("%s ids extracted", len(ids))
+
     return sorted(ids, key=int)
 
 
-def get_stations(ids: list[str] | None = None, refresh: bool = False) -> pd.DataFrame:
-    if not ids or refresh:
-        ids = get_ids()
-
+def get_stations(ids: list[str] = []) -> pd.DataFrame:
     rows = []
-    for id_ in ids:
+    for i, id_ in enumerate(ids, start=1):
         response = requests.get(STATION_URL+id_, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "lxml")
@@ -71,12 +79,30 @@ def get_stations(ids: list[str] | None = None, refresh: bool = False) -> pd.Data
         })
 
         time.sleep(1)
+        if i % 25 == 0 or i == len(ids):
+            logger.info("parsed %d/%d station pages, %d series so far", i, len(ids), len(rows))
 
     df = pd.DataFrame(rows, columns=COLUMNS)
     df["height_m"] = df["height_m"].astype("Int64") 
     return df.sort_values(["region", "station", "kind", "param", "macro"]).reset_index(drop=True)
 
 
-if __name__ == "__writter__":
-    df = get_stations(get_ids())
-    write_catalog(df, Path("stations"))
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build the SINCA station catalog")
+    parser.add_argument("-r", "--refresh", action="store_true", help="rebuild even if a catalog already exists")
+    args = parser.parse_args()
+
+    if (REFERENCE_PATH / "stations.csv").exists() and not args.refresh:
+        logger.info("catalog exists at %s; use --refresh to rebuild", REFERENCE_PATH)
+        return
+
+    ids = get_ids()
+    if not ids:
+        raise RuntimeError("no station ids found; SINCA's layout may have changed")
+
+    stations = get_stations(ids)
+    write_catalogs(stations)
+
+
+if __name__ == "__main__":
+    main()
