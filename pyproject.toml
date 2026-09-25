@@ -19,6 +19,7 @@ dependencies = [
     "pyarrow>=25.0.1",
     "scikit-learn>=1.9.0",
     "scipy>=1.18.0",
+    "tabulate>=0.10.0",
     "uvicorn[standard]>=0.51.0",
 ]
 
