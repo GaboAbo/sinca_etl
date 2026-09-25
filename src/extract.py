@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 
-RAW_DIR = Path("data/raw")
+RAW_DIR = Path("data/snapshots")
 BASE = "https://sinca.mma.gob.cl/cgi-bin/APUB-MMA/apub.tsindico2.cgi"
 
 """
