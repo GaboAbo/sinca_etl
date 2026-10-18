@@ -1,3 +1,10 @@
+"""Load step: upsert clean series into the local SQLite database.
+
+Rows are keyed on ``(station, pollutant, timestamp)``. A stored row is only
+overwritten when the incoming reading has a higher ``quality_rank``, so
+loads are idempotent and never downgrade a reading.
+"""
+
 import sqlite3
 import pandas as pd
 
@@ -13,6 +20,28 @@ def to_sqlite(
         pollutant: str,
         db_path: Path = DB_PATH,
         table: str = "measurements") -> dict:
+    """Upsert a clean series into SQLite and report what changed.
+
+    Creates the database file and table if needed. Each row is inserted,
+    or, if a row with the same key exists, updated only when the incoming
+    ``quality_rank`` is strictly higher.
+
+    Args:
+        df: Clean series as returned by :func:`src.transform.clean`,
+            indexed by ``timestamp``.
+        station: Station code stored on every row.
+        pollutant: Parameter code stored on every row.
+        db_path: SQLite database file.
+        table: Table name. Inserted into the SQL as-is, so it must not come
+            from user input.
+
+    Returns:
+        Row counts for this call: ``sent`` (rows passed in), ``inserted``
+        (new rows), ``updated`` (stored rows upgraded to a better tier),
+        ``unchanged`` (rows skipped because the stored reading was at least
+        as good) and ``total`` (rows now stored for this station and
+        pollutant).
+    """
     df = df.reset_index()
     df["station"] = station
     df["pollutant"] = pollutant
@@ -93,6 +122,20 @@ def get_last_date(
         pollutant: str,
         db_path: Path = Path("data/sinca.db"),
         table: str = "measurements") -> date | None:
+    """Return the date of the latest stored reading for a series.
+
+    Args:
+        station: Station code.
+        pollutant: Parameter code.
+        db_path: SQLite database file.
+        table: Table name. Inserted into the SQL as-is, so it must not come
+            from user input.
+
+    Returns:
+        The date of the most recent ``timestamp`` for this station and
+        pollutant, or ``None`` if the database, the table or the series
+        doesn't exist yet.
+    """
     if not db_path.exists():
         return None
 

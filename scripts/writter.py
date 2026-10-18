@@ -1,3 +1,13 @@
+"""Build the catalog of hourly series published by SINCA.
+
+Scrapes SINCA's region pages for station page IDs, then each station page for
+its hourly air quality (``Cal``) and meteorological (``Met``) series, and
+writes the result to ``REFERENCE_PATH/catalog.csv`` plus a dated snapshot.
+:mod:`main` reads that catalog to validate its arguments.
+
+Run with ``uv run python -m scripts.writter``.
+"""
+
 import requests, time, re, logging, argparse
 import pandas as pd
 
@@ -22,6 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 def write_catalogs(df: pd.DataFrame, path: Path = REFERENCE_PATH) -> None:    
+    """Write the catalog as a dated snapshot and as the current catalog.
+
+    Writes ``<path>/snapshots/catalog_<YYMMDD>.csv`` for today and
+    overwrites ``<path>/catalog.csv``, creating directories as needed.
+
+    Args:
+        df: Catalog as returned by :func:`get_stations`.
+        path: Output directory.
+    """
     snapshots = path / "snapshots"
     snapshots.mkdir(parents=True, exist_ok=True)
     today = date.today().strftime("%y%m%d")
@@ -31,6 +50,20 @@ def write_catalogs(df: pd.DataFrame, path: Path = REFERENCE_PATH) -> None:
     
 
 def get_ids(regions: list = REGIONS) -> list[str]:
+    """Collect station page IDs from SINCA's region pages.
+
+    Fetches each region page, one second apart, and extracts the ID from
+    every ``estacion/index/id/<n>`` link.
+
+    Args:
+        regions: Region codes to scan.
+
+    Returns:
+        Unique station page IDs, sorted numerically.
+
+    Raises:
+        requests.HTTPError: If a region page returns an error status.
+    """
     ids = set()
 
     for region in regions:
@@ -46,6 +79,28 @@ def get_ids(regions: list = REGIONS) -> list[str]:
 
 
 def get_stations(ids: list[str] = []) -> pd.DataFrame:
+    """Scrape station pages for their hourly series.
+
+    Fetches each page, one second apart, and reads its parameter links
+    (``<a class="iframe">`` with a ``macropath``). Only hourly series are
+    kept: air quality macros ending in ``horario.horario`` and
+    meteorological macros of the form ``horario_<height>``. Links whose
+    ``macropath`` is not ``region/station/kind/param`` are skipped.
+
+    Args:
+        ids: Station page IDs, as returned by :func:`get_ids`.
+
+    Returns:
+        One row per series with the columns in ``COLUMNS``, sorted by
+        region, station, kind, param and macro. ``page_id`` is SINCA's page
+        ID and ``station`` is the station code from the ``macropath``
+        (e.g. ``D12``). ``from`` and ``to`` are ``YYMMDD`` strings.
+        ``height_m`` is the sensor height in metres for ``Met`` series and
+        ``<NA>`` for ``Cal`` series.
+
+    Raises:
+        requests.HTTPError: If a station page returns an error status.
+    """
     rows = []
     for i, id_ in enumerate(ids, start=1):
         response = requests.get(STATION_URL+id_, timeout=30)
@@ -88,11 +143,19 @@ def get_stations(ids: list[str] = []) -> pd.DataFrame:
 
 
 def main() -> None:
+    """Scrape SINCA and write the catalog, unless one already exists.
+
+    Pass ``--refresh`` to rebuild an existing catalog.
+
+    Raises:
+        RuntimeError: If no station IDs are found, which usually means
+            SINCA's page layout has changed.
+    """
     parser = argparse.ArgumentParser(description="Build the SINCA station catalog")
     parser.add_argument("-r", "--refresh", action="store_true", help="rebuild even if a catalog already exists")
     args = parser.parse_args()
 
-    if (REFERENCE_PATH / "stations.csv").exists() and not args.refresh:
+    if (REFERENCE_PATH / "catalog.csv").exists() and not args.refresh:
         logger.info("catalog exists at %s; use --refresh to rebuild", REFERENCE_PATH)
         return
 
